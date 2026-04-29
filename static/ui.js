@@ -100,11 +100,28 @@ const _EXCALIDRAW_EXTS=/\.excalidraw$/i;
 const MEDIA_PLAYBACK_RATES=[0.5,0.75,1,1.25,1.5,2];
 const MEDIA_PLAYBACK_STORAGE_KEY='hermes-media-playback-rate';
 function _getStoredMediaPlaybackRate(){
-  try{const raw=localStorage.getItem(MEDIA_PLAYBACK_STORAGE_KEY);const rate=Number(raw);return MEDIA_PLAYBACK_RATES.includes(rate)?rate:1;}catch(_){return 1;}
+  try{
+    const raw=localStorage.getItem(MEDIA_PLAYBACK_STORAGE_KEY);
+    const rate=Number(raw);
+    return MEDIA_PLAYBACK_RATES.includes(rate)?rate:1;
+  }catch(_){return 1;}
 }
 function _setStoredMediaPlaybackRate(rate){
-  if(!MEDIA_PLAYBACK_RATES.includes(rate))return;
+  if(!MEDIA_PLAYBACK_RATES.includes(rate)) return;
   try{localStorage.setItem(MEDIA_PLAYBACK_STORAGE_KEY,String(rate));}catch(_){}
+}
+function _syncMediaSpeedButtons(editor, rate){
+  if(!editor) return;
+  editor.querySelectorAll('.media-speed-btn').forEach(b=>{
+    const active=Number(b.dataset.rate)===rate;
+    b.classList.toggle('active',active);
+    b.setAttribute('aria-pressed',active?'true':'false');
+  });
+}
+function _applyMediaPlaybackRate(media, rate=_getStoredMediaPlaybackRate()){
+  if(!media) return;
+  media.playbackRate=rate;
+  _syncMediaSpeedButtons(media.closest('.msg-media-editor,.preview-media-wrap'),rate);
 }
 function _mediaKindForName(name=''){
   const clean=String(name||'').split('?')[0].toLowerCase();
@@ -141,18 +158,32 @@ document.addEventListener('click', e => {
   if(!media) return;
   const rate=Number(btn.dataset.rate)||1;
   _setStoredMediaPlaybackRate(rate);
-  media.playbackRate=rate;
-  editor.querySelectorAll('.media-speed-btn').forEach(b=>{
-    const active=Number(b.dataset.rate)===rate;
-    b.classList.toggle('active',active);
-    b.setAttribute('aria-pressed',active?'true':'false');
-  });
+  _applyMediaPlaybackRate(media,rate);
 });
 document.addEventListener('loadedmetadata', e=>{
   if(e.target&&e.target.matches&&e.target.matches('.msg-media-player,audio,video')){
-    e.target.playbackRate=_getStoredMediaPlaybackRate();
+    _applyMediaPlaybackRate(e.target);
   }
 },true);
+function _initMediaPlaybackObserver(){
+  if(!document.body||window._mediaPlaybackObserver) return;
+  window._mediaPlaybackObserver=new MutationObserver(records=>{
+    for(const rec of records){
+      for(const node of rec.addedNodes||[]){
+        if(!node||node.nodeType!==1) continue;
+        const media=[];
+        if(node.matches&&node.matches('audio,video')) media.push(node);
+        if(node.querySelectorAll) media.push(...node.querySelectorAll('audio,video'));
+        media.forEach(m=>_applyMediaPlaybackRate(m));
+      }
+    }
+  });
+  window._mediaPlaybackObserver.observe(document.body,{childList:true,subtree:true});
+  document.querySelectorAll('audio,video').forEach(m=>_applyMediaPlaybackRate(m));
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',_initMediaPlaybackObserver);
+else _initMediaPlaybackObserver();
+setTimeout(_initMediaPlaybackObserver,0);
 
 // Dynamic model labels -- populated by populateModelDropdown(), fallback to static map
 let _dynamicModelLabels={};
@@ -1293,13 +1324,10 @@ function renderMd(raw){
     if(_SVG_EXTS.test(ref)){
       return `<img class="msg-media-svg" src="${esc(apiUrl)}" alt="${t('media_svg_label')}" loading="lazy">`;
     }
-    // Audio → inline player with speed controls
-    if(_AUDIO_EXTS.test(ref)){
-      return _mediaPlayerHtml('audio',apiUrl,ref.split('/').pop()||ref);
-    }
-    // Video → inline player with speed controls
-    if(_VIDEO_EXTS.test(ref)){
-      return _mediaPlayerHtml('video',apiUrl,ref.split('/').pop()||ref);
+    // Audio/video → inline player with speed controls; use &inline=1 for byte-range seeking
+    if(_AUDIO_EXTS.test(ref)||_VIDEO_EXTS.test(ref)){
+      const kind=_AUDIO_EXTS.test(ref)?'audio':'video';
+      return _mediaPlayerHtml(kind,apiUrl+'&inline=1',ref.split('/').pop()||ref);
     }
     // PDF files → render first page preview with lazy-load
     if(_PDF_EXTS.test(ref)){
@@ -2660,6 +2688,7 @@ function renderMessages(){
       if(S.activeStreamId){scrollIfPinned();}else{scrollToBottom();}
       requestAnimationFrame(()=>{highlightCode();addCopyButtons();loadDiffInline();loadCsvInline();loadExcalidrawInline();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();});
       requestAnimationFrame(()=>{highlightCode();addCopyButtons();initTreeViews();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();});
+      if(typeof _initMediaPlaybackObserver==='function') _initMediaPlaybackObserver();
       if(typeof loadTodos==='function'&&document.getElementById('panelTodos')&&document.getElementById('panelTodos').classList.contains('active')){loadTodos();}
       return;
     }
@@ -3082,6 +3111,8 @@ function renderMessages(){
   if(typeof loadTodos==='function' && document.getElementById('panelTodos') && document.getElementById('panelTodos').classList.contains('active')){
     loadTodos();
   }
+  // Apply persisted playback speed after media nodes are rendered.
+  if(typeof _applyMediaPlaybackPreferences==='function') _applyMediaPlaybackPreferences(inner);
   // Populate session cache so switching back here skips a full rebuild.
   _sessionHtmlCacheSid=sid;
   if(sid){
