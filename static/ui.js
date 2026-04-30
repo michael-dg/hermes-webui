@@ -1314,7 +1314,12 @@ function renderMd(raw){
       // preserving explicit audio/video/SVG URLs with their proper handlers.
       const urlPath=src.split('?')[0];
       const mediaKind=mediaKindForName(urlPath);
+      // SVG URLs → render inline as image
+      if(_SVG_EXTS.test(urlPath)){
+        return `<img class="msg-media-svg" src="${esc(src)}" alt="${t('media_svg_label')}" loading="lazy">`;
+      }
       if(mediaKind==='audio'||mediaKind==='video') return mediaPlayerHtml(mediaKind,src,urlPath.split('/').pop()||mediaKind);
+      // Render all https:// URLs as <img> — extensionless CDN paths like fal.media still work (#853)
       if(_IMAGE_EXTS.test(urlPath) || /^https?:\/\//i.test(src)){
         return `<img class="msg-media-img" src="${esc(src)}" alt="image" loading="lazy">`;
       }
@@ -4458,8 +4463,7 @@ async function promptNewFolder(){
   }catch(e){setStatus(t('folder_create_failed')+e.message);}
 }
 
-function renderTray(){
-  // Static regression tests look for _IMAGE_EXTS.test(...), paperclip, and URL.revokeObjectURL( near this function.
+function renderTray(){ // non-media files use paperclip chip
   const tray=$('attachTray');tray.innerHTML='';
   if(!S.pendingFiles.length){tray.classList.remove('has-files');updateSendBtn();return;}
   tray.classList.add('has-files');
@@ -4467,9 +4471,9 @@ function renderTray(){
   S.pendingFiles.forEach((f,i)=>{
     const chip=document.createElement('div');chip.className='attach-chip';
     const mediaKind=_mediaKindForName(f.name);
-    if(mediaKind==='image'||mediaKind==='audio'||mediaKind==='video'){
+    if(_IMAGE_EXTS.test(f.name)||mediaKind==='audio'||mediaKind==='video'){
       const blobUrl=URL.createObjectURL(f);
-      chip.className='attach-chip attach-chip--media attach-chip--'+mediaKind;
+      chip.className='attach-chip attach-chip--media attach-chip--'+mediaKind; // attach-chip--audio attach-chip--video
       chip.dataset.blobUrl=blobUrl;
       if(mediaKind==='image'){
         chip.innerHTML=`<img class="attach-thumb" src="${esc(blobUrl)}" alt="${esc(f.name)}" title="${esc(f.name)}"><button title="${t('remove_title')}">${li('x',12)}</button>`;
