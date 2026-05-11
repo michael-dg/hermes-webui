@@ -146,6 +146,11 @@ load_env() {
   if [ -f "$tocheck" ]; then
     echo "-- Loading environment variables from $tocheck (overwrite existing: $overwrite_if_different) (ignorelist: $ignore_list) (obfuscate: $obfuscate_part)"
     while IFS='=' read -r key value; do
+      # Skip continuation lines from multi-line env values (e.g., a Git deploy
+      # populates RAILWAY_GIT_COMMIT_MESSAGE with embedded newlines, which env|sort
+      # dumps as several lines — only the first has KEY=, the rest are bare text).
+      # Bash's ${!key} indirect expansion below would error on non-identifier keys.
+      if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then continue; fi
       doit=false
       # checking if the key is in the ignorelist
       for i in $ignore_list; do
