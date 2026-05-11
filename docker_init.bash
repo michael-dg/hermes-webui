@@ -227,6 +227,17 @@ if [ "A${whoami}" == "Aroot" ]; then
   chown hermeswebui:hermeswebui "${UV_CACHE_DIR}" || error_exit "Failed to set owner of ${UV_CACHE_DIR} to hermeswebui user"
 
   chown -R "${WANTED_UID}:${WANTED_GID}" "$itdir" || error_exit "Failed to set owner of $itdir"
+  # Issue #2010 — Align $HERMES_WEBUI_STATE_DIR ownership with WANTED_UID/GID.
+  # On Railway the volume mount arrives root:root, and persisted files from
+  # prior deploys may also be root-owned (notably .signing_key, the PBKDF2 salt
+  # for HERMES_WEBUI_PASSWORD — unreadable signing_key silently randomizes the
+  # hash every request and breaks login). Recursive chown is best-effort: on
+  # truly user-namespaced runtimes where root cannot chown, the existing strict
+  # verifier at the post-su touch will catch the remaining permission issue.
+  if [ -n "${HERMES_WEBUI_STATE_DIR+x}" ] && [ -d "$HERMES_WEBUI_STATE_DIR" ]; then
+    chown -R "${WANTED_UID}:${WANTED_GID}" "$HERMES_WEBUI_STATE_DIR" 2>/dev/null \
+      || echo "  !! Could not chown -R $HERMES_WEBUI_STATE_DIR (continuing — set WANTED_UID/GID to the volume's host-side owner if subsequent writes fail)"
+  fi
   # Issue #2010 — Railway / user-namespaced runtimes: in-container UID 0 may map
   # to a host UID outside the writable subuid range, so /tmp writes fail despite
   # id -u == 0. Probe writability and fall back through $itdir → /app.
